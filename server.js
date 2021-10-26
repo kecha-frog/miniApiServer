@@ -31,13 +31,18 @@ const checkAuthorization = (req) => {
 //Отправка ошибки
 const errorResponseSend = (res, err) => {
     const {name} = err;
+
     if (name === 'unauthorized') {
         res.status(401)
             .send('No authorization');
     } else if (name === 'noFileName' || name === 'noContent') {
         res.status(400)
             .send(name);
-    } else {
+    } else if('noFile'){
+        res.status(500)
+            .send('No file in dir');
+    }else {
+        //Любая неизвестная ошибка
         res.status(500)
             .send('Internal server error\n' + err + 'error');
     }
@@ -84,10 +89,13 @@ app.route('/delete')
             const filePath = filesDir + `/${filename}.txt`
             await fs.unlink(filePath,
                 (err) => {
-                    if (err) {
-                        //Если ошибка то будет статус 500
+                    //Если нет файла
+                    if (err.code === 'ENOENT') {
+                        errorResponseSend(res, 'noFile')
+                    } else if (err){
+                        //если другая какая ошибка
                         errorResponseSend(res, 'delete')
-                    } else {
+                    }else {
                         res.status(200)
                             .send('File delete');
                     }
@@ -121,7 +129,7 @@ app.route('/post')
 
             await fs.writeFile(filesDir + `/${filename}.txt`, content, {flag: 'w+'},
                 (err) => {
-                    //Если ошибка то будет статус 500
+                    //Если какая то неизвестная ошибка то будет статус 500
                     if (err) throwError('fileWrite')
                     res.status(200)
                         .send("File add")
