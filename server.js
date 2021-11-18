@@ -1,16 +1,61 @@
 const express = require('express')
+const cookieParser = require('cookie-parser')
+
 const fs = require("fs");
 const path = require("path");
 
-const successText = 'success'
 const notAllowedText = 'HTTP method not allowed'
 const filesDir = path.join(__dirname, 'files')
+const cookieSetting = {maxAge: 1000 * 60 * 60 * 24 * 2, httpOnly: true};
 
+const user = {
+    id: 123,
+    username: 'testuser',
+    password: 'qwerty'
+};
+
+
+//Вызываю ошибку
+const throwError = (error) => {
+    throw {name: error}
+}
+
+//Проверка авторизации(выбрасывание ошибки)
+const checkAuthorization = (req) => {
+    const {userid, authorized} = req.cookies
+    if (userid !== user.id.toString() || authorized !== 'true') {
+        throwError('unauthorized')
+    }
+}
+
+//Отправка ошибки
+const errorResponseSend = (res, err) => {
+    const {name} = err;
+
+    if (name === 'unauthorized') {
+        res.status(401)
+            .send('No authorization');
+    } else if (name === 'noFileName' || name === 'noContent') {
+        res.status(400)
+            .send(name);
+    } else if('noFile'){
+        res.status(500)
+            .send('No file in dir');
+    }else {
+        //Любая неизвестная ошибка
+        res.status(500)
+            .send('Internal server error\n' + err + 'error');
+    }
+}
 
 const app = express()
 const port = 8000
 
-// 1
+//JSON parser
+app.use(express.json())
+app.use(cookieParser())
+
+
 app.route('/get')
     .get((req, res) => {
         try {
@@ -27,37 +72,89 @@ app.route('/get')
             .send(notAllowedText);
     })
 
-// 2
+// 3
 app.route('/delete')
-    .delete(((req, res) => {
-        res.status(200)
-            .send(successText);
+    .delete((async (req, res) => {
+        try {
+            //Проверка
+            checkAuthorization(req)
+
+            const {filename} = req.body
+
+            //Если не передали название файла
+            if (!filename?.length) {
+                throwError('noFileName')
+            }
+
+            const filePath = filesDir + `/${filename}.txt`
+            await fs.unlink(filePath,
+                (err) => {
+                    //Если нет файла
+                    if (err.code === 'ENOENT') {
+                        errorResponseSend(res, 'noFile')
+                    } else if (err){
+                        //если другая какая ошибка
+                        errorResponseSend(res, 'delete')
+                    }else {
+                        res.status(200)
+                            .send('File delete');
+                    }
+                });
+        } catch (err) {
+            // Отлавливаю ошибку
+            errorResponseSend(res, err)
+        }
     }))
     .all((req, res) => {
         res.status(405)
             .send(notAllowedText);
     })
 
+// 2
 app.route('/post')
-    .post((req, res) => {
-        res.status(200)
-            .send(successText);
+    .post(async (req, res) => {
+        try {
+            const {filename, content} = req.body
+            //Проверка
+            checkAuthorization(req)
+
+            //Если не передали название файла
+            if (!filename?.length) {
+                throwError('noFileName')
+            }
+            //Если не передали текст файла
+            if (!content?.length) {
+                throwError('noContent')
+            }
+
+            await fs.writeFile(filesDir + `/${filename}.txt`, content, {flag: 'w+'},
+                (err) => {
+                    //Если какая то неизвестная ошибка то будет статус 500
+                    if (err) throwError('fileWrite')
+                    res.status(200)
+                        .send("File add")
+                })
+        } catch (err) {
+            //Отлавливаю ошибку
+            errorResponseSend(res, err)
+        }
+
+
     })
     .all((req, res) => {
         res.status(405)
             .send(notAllowedText);
     })
 
-// 3
 app.route('/redirect')
     .get((req, res) => {
         res.setTimeout(3000, () => {
-            //Альтернативный способ
-            // res.status(301)
-            //     .location('/redirect')
-
             res.redirect('/redirected')
         })
+    })
+    .all((req, res) => {
+        res.status(405)
+            .send(notAllowedText);
     })
 
 app.route('/redirected')
@@ -66,6 +163,33 @@ app.route('/redirected')
                 .send('/redirect moved to /redirected')
         }
     )
+    .all((req, res) => {
+        res.status(405)
+            .send(notAllowedText);
+    })
+
+// 1
+app.route('/auth',)
+    .post((req, res) => {
+            const {login, pass} = req.body
+            //Если пришли логин и пароль
+            if (login === user.username && pass === user.password) {
+                res.status(200)
+                //Передаю Cookie
+                res.cookie('userid', user.id, cookieSetting)
+                res.cookie('authorized ', true, cookieSetting)
+                res.end()
+            } else {
+                res.status(400)
+                    .send('wrong login or password')
+            }
+
+        }
+    )
+    .all((req, res) => {
+        res.status(405)
+            .send(notAllowedText);
+    })
 
 
 app.use(function (req, res) {
